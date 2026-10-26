@@ -1,9 +1,26 @@
+import csv
+import os
 import time
+from datetime import datetime
 
 link_load = {}
 previous_stats = {}
 
 LINK_SPEED_BPS = 10_000_000  # 10 Mbps default
+LOG_DIR = "/home/seema/cdn-project/results"
+LOG_FILE = os.path.join(LOG_DIR, "link_utilization.csv")
+
+os.makedirs(LOG_DIR, exist_ok=True)
+
+if not os.path.exists(LOG_FILE):
+    with open(LOG_FILE, "w", newline="") as f:
+        csv.writer(f).writerow([
+            "timestamp",
+            "switch_id",
+            "port_no",
+            "utilization_percent",
+        ])
+
 
 def calculate_utilization(bytes_delta, interval, link_speed_bps):
     if interval <= 0 or link_speed_bps <= 0:
@@ -26,9 +43,18 @@ def update_port_stats(switch_id, port_no, rx_bytes, tx_bytes, timestamp=None):
         interval = timestamp - old_time
         byte_delta = max(0, current_bytes - old_bytes)
 
-        link_load[key] = calculate_utilization(
+        utilization = calculate_utilization(
             byte_delta, interval, LINK_SPEED_BPS
         )
+        link_load[key] = utilization
+
+        with open(LOG_FILE, "a", newline="") as f:
+            csv.writer(f).writerow([
+                datetime.now().isoformat(timespec="seconds"),
+                switch_id,
+                port_no,
+                round(utilization * 100, 2),
+            ])
 
     previous_stats[key] = (current_bytes, timestamp)
 
@@ -37,9 +63,27 @@ def main():
     print("Link monitor helper ready.", flush=True)
     print("Waiting for OpenFlow port statistics integration.", flush=True)
 
-    while True:
-        print("Current link loads:", link_load, flush=True)
-        time.sleep(2)
+    try:
+        while True:
+            if link_load:
+                print("Current link loads:", flush=True)
+                for key, utilization in link_load.items():
+                    print(
+                        f"Switch {key[0]}, port {key[1]}: "
+                        f"{utilization * 100:.2f}% utilized",
+                        flush=True,
+                    )
+            else:
+                print(
+                    "No port statistics received yet; "
+                    "OpenFlow integration is still required.",
+                    flush=True,
+                )
+
+            time.sleep(2)
+
+    except KeyboardInterrupt:
+        print("\nLink monitor stopped.", flush=True)
 
 
 if __name__ == "__main__":
